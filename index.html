@@ -154,6 +154,7 @@ h1{font-family:var(--display);font-weight:800;font-size:clamp(2rem,7vw,3.25rem);
 
 /* Brett */
 .boardwrap{position:relative;width:100%}
+.kbd{position:absolute;left:50%;top:50%;width:1px;height:1px;margin:0;padding:0;border:0;opacity:0;font-size:16px;pointer-events:none;caret-color:transparent}
 .board{container-type:inline-size;aspect-ratio:1;width:100%;display:grid;grid-template-columns:repeat(9,1fr);grid-template-rows:repeat(9,1fr);
   background:var(--cell);border:2px solid var(--line-strong);box-shadow:6px 6px 0 var(--shadow)}
 .cell{position:relative;display:grid;place-items:center;min-width:0;padding:0;margin:0;background:var(--cell);color:var(--ink);cursor:pointer;
@@ -254,6 +255,7 @@ button:focus-visible{outline:2px solid var(--shu);outline-offset:2px}
         </div>
         <div class="boardwrap o3">
           <div class="board" id="board" role="group" aria-label="Sudoku-Spielfeld"></div>
+          <input class="kbd" id="kbd" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="Zahl eingeben" value="0" tabindex="-1">
           <div class="veil" id="veil" hidden>
             <div class="card" id="busy" hidden><p>Rätsel wird vorbereitet …</p></div>
             <div class="card" id="pause" hidden>
@@ -299,14 +301,16 @@ button:focus-visible{outline:2px solid var(--shu);outline-offset:2px}
           </div>
         </section>
 
-        <section class="o5" aria-labelledby="lab-pad">
+        <section class="o5" id="padSection" aria-labelledby="lab-pad">
           <h2 class="lab" id="lab-pad">Zahlen</h2>
           <div class="pad" id="pad"></div>
         </section>
 
         <section class="o6 opts" aria-label="Einstellungen">
           <label for="opt-errors"><input type="checkbox" id="opt-errors">Fehler sofort markieren</label>
-          <p class="keys-hint">Tastatur: 1–9 setzt eine Zahl, N schaltet Notizen um, Rücktaste löscht, Pfeiltasten bewegen, Strg+Z macht rückgängig, H gibt einen Tipp.</p>
+          <label for="opt-same"><input type="checkbox" id="opt-same">Zeile, Spalte und gleiche Zahlen hervorheben</label>
+          <label for="opt-pad"><input type="checkbox" id="opt-pad">Zahlenfeld auf dem Bildschirm anzeigen</label>
+          <p class="keys-hint">Tastatur: Auf dem Handy öffnet das Antippen eines Felds die Zahlentastatur. 1–9 setzt eine Zahl, N schaltet Notizen um, Rücktaste löscht, Pfeiltasten bewegen, Strg+Z macht rückgängig, H gibt einen Tipp.</p>
         </section>
       </div>
     </main>
@@ -444,12 +448,15 @@ function makePuzzle(level, budgetMs) {
   store.v = 1;
   if (typeof store.markErrors !== 'boolean') store.markErrors = true;
   if (!store.best || typeof store.best !== 'object') store.best = {};
+  const COARSE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if (typeof store.showSame !== 'boolean') store.showSame = false;
+  if (typeof store.showPad !== 'boolean') store.showPad = !COARSE;
 
   let S = null, busy = false, pending = null;
 
   const boardEl = $('#board'), veil = $('#veil');
   const busyEl = $('#busy'), pauseEl = $('#pause'), winEl = $('#win');
-  const padEl = $('#pad');
+  const padEl = $('#pad'), kbd = $('#kbd');
   const cells = [], keys = [];
 
   /* ---------- Brett aufbauen ---------- */
@@ -541,8 +548,8 @@ function makePuzzle(level, budgetMs) {
       el.classList.toggle('given', given);
       el.classList.toggle('user', !given && v > 0);
       el.classList.toggle('sel', i === sel);
-      el.classList.toggle('peer', i !== sel && peerSet.has(i));
-      el.classList.toggle('same', i !== sel && selV > 0 && v === selV);
+      el.classList.toggle('peer', store.showSame && i !== sel && peerSet.has(i));
+      el.classList.toggle('same', store.showSame && i !== sel && selV > 0 && v === selV);
       el.classList.toggle('wrong', store.markErrors && !given && v > 0 && v !== S.solution[i]);
       el.classList.toggle('hasn', !v && m > 0);
       el.tabIndex = i === sel || (sel < 0 && i === 0) ? 0 : -1;
@@ -564,6 +571,9 @@ function makePuzzle(level, budgetMs) {
     $('#hint').disabled = locked;
     document.querySelectorAll('.lv').forEach((b) => b.setAttribute('aria-pressed', b.dataset.level === S.level ? 'true' : 'false'));
     $('#opt-errors').checked = store.markErrors;
+    $('#opt-same').checked = store.showSame;
+    $('#opt-pad').checked = store.showPad;
+    $('#padSection').hidden = !store.showPad;
     $('#mist').textContent = store.markErrors ? S.mistakes : '–';
     $('#mist').classList.toggle('bad', store.markErrors && S.mistakes > 0);
     $('#hints').textContent = S.hints;
@@ -661,6 +671,13 @@ function makePuzzle(level, budgetMs) {
     render();
     save();
   }
+  function focusKbd() {
+    if (!COARSE) return;
+    if (!usable()) { kbd.blur(); return; }
+    kbd.value = '0';
+    kbd.focus({ preventScroll: true });
+    try { kbd.setSelectionRange(1, 1); } catch (e) { /* egal */ }
+  }
   function select(i) {
     if (!S || busy) return;
     S.selected = i;
@@ -714,7 +731,7 @@ function makePuzzle(level, budgetMs) {
   /* ---------- Ereignisse ---------- */
   boardEl.addEventListener('click', (e) => {
     const c = e.target.closest('.cell');
-    if (c) select(+c.dataset.i);
+    if (c) { select(+c.dataset.i); focusKbd(); }
   });
   boardEl.addEventListener('focusin', (e) => {
     const c = e.target.closest('.cell');
@@ -737,6 +754,16 @@ function makePuzzle(level, budgetMs) {
   });
   $('#confirmYes').addEventListener('click', () => { if (pending) startGame(pending, false); });
   $('#confirmNo').addEventListener('click', () => { pending = null; $('#confirm').hidden = true; });
+  kbd.addEventListener('input', () => {
+    const v = kbd.value;
+    if (!v.length) erase();
+    else if (/[1-9]/.test(v.slice(-1))) place(+v.slice(-1));
+    kbd.value = '0';
+    try { kbd.setSelectionRange(1, 1); } catch (e) { /* egal */ }
+  });
+  [$('.tools'), padEl].forEach((el) => el.addEventListener('mousedown', (e) => { if (document.activeElement === kbd) e.preventDefault(); }));
+  $('#opt-same').addEventListener('change', (e) => { store.showSame = e.target.checked; saveStore(); render(); });
+  $('#opt-pad').addEventListener('change', (e) => { store.showPad = e.target.checked; saveStore(); render(); });
   $('#opt-errors').addEventListener('change', (e) => {
     store.markErrors = e.target.checked;
     saveStore();
@@ -745,6 +772,7 @@ function makePuzzle(level, budgetMs) {
 
   document.addEventListener('keydown', (e) => {
     if (!S || busy) return;
+    if (e.target === kbd) return;
     if (e.target.closest && e.target.closest('input,textarea,select')) return;
     if (e.ctrlKey || e.metaKey) {
       if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
